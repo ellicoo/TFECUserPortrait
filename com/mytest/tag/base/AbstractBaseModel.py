@@ -216,7 +216,8 @@ class AbstractBaseModel:
 
     def execute(self):
         # # 0.初始化Spark环境--本类的魔法函数已经做了spark的初始化spark对象的操作
-        self.__init__(self.fourTagId)
+        # fix:__init__ 方法仅在类实例化时调用一次，不必再在 execute 方法中重复调用
+        # self.__init__(self.fourTagId)
         # 1.根据4级标签ID，读取MySQL标签体系数据--读出来的结果是一张表
         input_df = self.read_mysql_data()
         # 2.过滤4级标签的数据，将四级标签的rule转换为esMeta对象，id不同，逻辑相同
