@@ -22,6 +22,8 @@ os.environ['PYSPARK_DRIVER_PYTHON'] = '/root/anaconda3/envs/pyspark_env/bin/pyth
 
 
 class AgeModel1(AbstractBaseModel):
+    # 如果子类没有显式声明自己的 __init__ 方法，那么在创建子类实例时，父类的 __init__ 方法会被自动调用
+    # 如果子类自定义自己的魔法函数，则需要super().__init__(...)调用父类构造器
     # Ctrl + O:快速打开覆盖选项
     # 打标签的方法，每个标签的逻辑都不一样，因此每个标签都需要自己实现这个方法
     def compute(self, es_df, five_df):
