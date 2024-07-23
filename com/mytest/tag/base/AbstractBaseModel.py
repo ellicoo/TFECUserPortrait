@@ -53,7 +53,7 @@ os.environ['PYSPARK_DRIVER_PYTHON'] = '/root/anaconda3/envs/pyspark_env/bin/pyth
 # 尽管函数merge_tags传递进去的参数是new_df['tagsId'], old_df['tagsId']，都是dataframe,但是由于merge_tags是个udf函数，实际上是传递进去的是
 # new_df['tagsId'], old_df['tagsId']这两个df的一行，是一行一行的数据作为udf的参数，而不是整个dataframe作为参数
 # 问题，new_df['tagsId'], old_df['tagsId']这两个df需要行数相等且userId逐行对应吗？
-# 需要，(注意，每次都是全量打标签)所以需要先left join，通过new_df['userId'] == old_df['userId']来实现本次udf行操作的两个df，都是操作同一个userId的tagsId
+# 需要，(注意，每次都是全量打标签，本人建议增量这里是全量)所以需要先left join，通过new_df['userId'] == old_df['userId']来实现本次udf行操作的两个df，都是操作同一个userId的tagsId
 # 1。在本次udf的行操作中，如果这个userId对应的新标签tagsId为None,即本行的userId没有中到任何rule条件不打标签，则跳出本次udf的行迭代，直接将旧的的标签作为新的合并后的标签，进入下一行的udf操作。
 # 2。在本次udf的行操作中，如果这个userId对应的新标签tagsId不为None，说明本行的userId打了新标签，而对应的old_df没打过标签，则直接将这个新标签作为合并后的标签
 # 3。在本次udf的行操作中，如果这个userId对应的新标签tagsId不为None，说明本行的userId打了新标签，但对应的old_df打过标签，此时需要进行标签合并操作
