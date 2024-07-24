@@ -263,10 +263,13 @@ class AbstractBaseModel:
         es_df = self.read_es_df_by_esMeta(esMeta)
         # 4.根据4级标签ID，读取5级标签的数据
         # 刚刚我们只要input(来源与mysql)表中的rule字段来转换成meta对象去es中找待操作的数据表
-        # 现在我们还需要input表中的其他字段值，level字段为5的值，这个值有很多，但我只要刚刚指定的rule字段下的5级值，取出的是规则值
-        # 把规则值和刚刚找到的es表的数据进行操作(匹配、统计、挖掘)
+        # 现在我们还需要input表中fourTagId=pid的5级标签规则子表，它的rule是5级rule，
+        # 【关系】：fourTagId—>规则表id->规则表的id等级为level=4，我只要刚刚fourTagId对应的level=5且pid=fourTagId的标签规则子表,
+
         five_df = self.read_five_df_by_fourTagId(input_df)
         # 5.通过ES中的业务数据与MySQL的5级标签进行打标签，完全不一样
+        # 我们对mysql规则表的子表five_df只需要id和rule两个字段，id是5级rule下的level=5的id(也是目标标签),此处的rule是level=5的标签规则，跟level=4的标签规则rule指定ES数据存储位置不同，5级的rule是具体的数据操作依据
+        # 把中到5级rule规则的用户user，打这个5级规则对应的id作为标签，这是对刚刚找到的es表的数据进行的打标签操作(匹配、统计、挖掘)
         new_df = self.compute(es_df, five_df)
         try:
             # 6.从ES中读取历史用户标签数据
