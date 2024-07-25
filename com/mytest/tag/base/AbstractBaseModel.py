@@ -48,13 +48,13 @@ os.environ['PYSPARK_DRIVER_PYTHON'] = '/root/anaconda3/envs/pyspark_env/bin/pyth
 """
 
 
-# 自定义的函数，用来实现简单的两个字符串的合并--后面再将这个操作设置成逐行迭代(UDF)--完成对整个df的标签列合并
+# 自定义的函数，用来实现简单的两个字符串的合并--后面再将这个操作设置成逐行迭代(UDF)--完成对两个关联df的整个df标签列的更新合并
 # merge_tags(new_df['tagsId'], old_df['tagsId']）
 # 尽管函数merge_tags传递进去的参数是new_df['tagsId'], old_df['tagsId']，都是dataframe,但是由于merge_tags是个udf函数，实际上是传递进去的是
-# new_df['tagsId'], old_df['tagsId']这两个df的一行，是一行一行的数据作为udf的参数，而不是整个dataframe作为参数
+# new_df['tagsId'], old_df['tagsId']这两个df的一行，是一行一行的"行对象"数据作为udf的参数，而不是整个dataframe作为参数
 # 问题，new_df['tagsId'], old_df['tagsId']这两个df需要行数相等且userId逐行对应吗？
 # 需要，(注意，每次都是全量打标签，本人建议增量这里是全量)所以需要先left join，通过new_df['userId'] == old_df['userId']来实现本次udf行操作的两个df，都是操作同一个userId的tagsId
-# 1。在本次udf的行操作中，如果这个userId对应的新标签tagsId为None,即本行的userId没有中到任何rule条件不打标签，则跳出本次udf的行迭代，直接将旧的的标签作为新的合并后的标签，进入下一行的udf操作。
+# 1。在本次udf的"行对象操作"(简称行操作)中，如果这个userId对应的新标签tagsId为None,即本行的userId没有中到任何5级rule条件故不打标签，则跳出本次udf的行迭代，直接将旧的的标签作为新的合并后的标签，进入下一行的udf操作。
 # 2。在本次udf的行操作中，如果这个userId对应的新标签tagsId不为None，说明本行的userId打了新标签，而对应的old_df没打过标签，则直接将这个新标签作为合并后的标签
 # 3。在本次udf的行操作中，如果这个userId对应的新标签tagsId不为None，说明本行的userId打了新标签，但对应的old_df打过标签，此时需要进行标签合并操作
 
@@ -145,8 +145,8 @@ class AbstractBaseModel:
     #            用对象存储起来--方便复用，比如read_old_df_from_es和write_result_df_to_es就再需要调用
     # spark环境存储在对象成员变量中，使用self.spark才可以访问
 
-    # 【调用建议】在调用处"有时候"最好只读新增数据，本项目都是对全量数据(包含历史和新增或者更新)打标签，因为增量数据如果对旧表有更新操作，最后打完标签后，ES的append方式会覆盖历史标签数据实现目标
-    # 只需要在调用处，将user
+    # 【调用建议】在调用处"有时候"最好只读新增数据，本项目都是对全量数据(包含历史和新增或者更新)打标签，因为增量数据如果对旧表有更新操作，打完标签并合并后，ES的append方式会覆盖历史标签数据
+    # 只需要在调用处，筛选增量数据，也可以实现对标签的更新和新增，不需要全量计算
     # 步骤：
     # 1）在 Elasticsearch 文档中添加时间戳字段两个，比如将 Hive 数据导入到 (ES) 之前或期间，可以添加两个时间字段：创建和更新，如:
     # inser into table es_table select 'hive表字段', current_timestamp() as created_at, current_timestamp() as updated_at from hive表
@@ -155,7 +155,7 @@ class AbstractBaseModel:
     # #pyspark中：
     # （1）# 计算过去一天的时间
     # one_day_ago = (datetime.now() - timedelta(days=1)).isoformat()
-    # （2）读出ES全量数据df=read_es_df_by_esMeta(esMeta)
+    # （2）读出ES全量数据：df=read_es_df_by_esMeta(esMeta)
     # （3）# 过滤出最近一天新增和更新的数据
     # df_recent = df.filter((df["created_at"] >= one_day_ago) | (df["updated_at"] >= one_day_ago))
 
@@ -185,7 +185,7 @@ class AbstractBaseModel:
         pass
 
     # 6.从ES中读取历史用户标签数据，一样的
-    # 【说明】返回的是一张大窄表，是以前的标签数据，只要两列，不需要做列裁剪
+    # 【说明】返回的是一张大窄表，是以前的业务数据的"用户和标签"表，只要两列，不需要做列裁剪
     def read_old_df_from_es(self, esMeta):
         old_df = self.spark.read \
             .format('es') \
@@ -211,6 +211,7 @@ class AbstractBaseModel:
     # 2。此处需要保证增量数据完整使用left join，--比如消费周期标签更在增量new_df中，这个UDF操作后old_df也会被更新合并到结果中
 
     # 【说明】返回的是一张标签合并后的窄表，大表(全量数据时)，中等表或者小表(增量或者更新数据时），
+    # fiveTagIDStr是spark的列对象列表
     def merge_old_df_and_new_df(self, new_df, old_df, fiveTagIDStr):
         result_df = new_df.join(other=old_df, on=new_df['userId'] == old_df['userId'], how='left') \
             .select(new_df['userId'], merge_tags(new_df['tagsId'], old_df['tagsId'], fiveTagIDStr).alias("tagsId"))
@@ -261,34 +262,44 @@ class AbstractBaseModel:
         esMeta = self.input_df_to_esMeta(input_df)
         # 3.根据esMeta对象从ES中读取相应的业务数据--读出来的结果是一张表--一张待匹配或者待统计或者待挖掘的业务数据的表
         es_df = self.read_es_df_by_esMeta(esMeta)
-        # 4.根据4级标签ID，读取5级标签的数据
-        # 刚刚我们只要input(来源与mysql)表中的rule字段来转换成meta对象去es中找待操作的数据表
-        # 现在我们还需要input表中fourTagId=pid的5级标签规则子表，它的rule是5级rule，
-        # 【关系】：fourTagId—>规则表id->规则表的id等级为level=4，我只要刚刚fourTagId对应的level=5且pid=fourTagId的标签规则子表,
+        # 4.根据4级标签ID，读取对应的5级标签的数据--规则表的子表
+        # 刚刚我们只要input_df(来源于mysql)表中的某个level=4的rule字段来转换成meta对象，根据这个meta去es中找到待打标签的业务数据表
+        # 现在还需要input_df表中的,通过fourTagId=pid筛选出作为打标签依据的5级(标签id&规则rule)子表（注：它的rule是5级rule）
+        # 【关系】：fourTagId--规则表的某个level=4的id，这里只要这个特定的fourTagId对应的level=5,通过pid=fourTagId过滤出的mysql规则表的子表--打标签依据的具体标签规则表
 
         five_df = self.read_five_df_by_fourTagId(input_df)
         # 5.通过ES中的业务数据与MySQL的5级标签进行打标签，完全不一样
-        # 我们对mysql规则表的子表five_df只需要id和rule两个字段，id是5级rule下的level=5的id(也是目标标签),此处的rule是level=5的标签规则，跟level=4的标签规则rule指定ES数据存储位置不同，5级的rule是具体的数据操作依据
-        # 把中到5级rule规则的用户user，打这个5级规则对应的id作为标签，这是对刚刚找到的es表的数据进行的打标签操作(匹配、统计、挖掘)
+        # 我们对mysql规则表的子表five_df只挑出id和rule两个字段，这个子表的id是mysql规则表中用于给数据源打的目标标签,而这个子表的rule是level=5的5级标签规则--即打标签的具体依据，
+        # 跟level=4的标签规则rule指定ES数据存储位置不同，level=5的rule是具体的数据操作依据
+        # 把中到规则子表five_df的5级rule规则的用户user，将这个5级rule规则对应的id作为这个user的标签，这是对es业务数据表进行的打标签操作(匹配、统计、挖掘)
         new_df = self.compute(es_df, five_df)
         try:
             # 6.从ES中读取历史用户标签数据
             old_df = self.read_old_df_from_es(esMeta)
             # 标签更新
             """
-            需要传入改4级标签下的所有5级标签的ID号。不能直接给five_df（ID、rule）
+            因为标签更新或者合并操作merge_old_df_and_new_df需要传入指定的某个4级标签下的所有5级标签的ID号列表。不能直接给five_df（ID、rule），只需要标签子表的id
             （1）通过five_df获取所有ID
             （2）传入所有ID（List）List不能直接传入到自定义函数中，自定义需要只能传入2种类型（Column、Str）
             （3）把list转换为字符串，使用固定的分割符号拼接
                 ",".join(List)
             """
-            fiveTagIDList = five_df.rdd.map(lambda x: x.id).collect()
+            fiveTagIDList = five_df.rdd.map(lambda x: x.id).collect()  # 返回的是一个存储"规则子表的标签id(5级的)"的"python列表"
 
             # 7.将老的用户画像标签与新的标签进行合并，得到最终标签
 
             """
+            （1）fiveTagIDList 是个python列表
             ",".join(str(id) for id in fiveTagIDList) 首先将 fiveTagIDList 中的所有 ID 转换为字符串，并用逗号连接成一个字符串。
-            F.lit() 然后将这个生成的字符串转换为 Spark 列对象，这个列对象的值在 DataFrame 的每一行中都是相同的
+            F.lit() 将常量值转换成列对象，这个列对象的值在 DataFrame 的每一行中都是相同的
+            比如：",".join(str(id) for id in fiveTagIDList)出来的是1,2,3,4,5
+            （2)需要将这个存储整个5级标签规则子表的标签id的python列表转成spark行对象，行对象的内容是"5级标签id列表"
+            F.lit(",".join(str(id) for id in fiveTagIDList))：
+                                                                |1,2,3,4,5 |
+                                                                |1,2,3,4,5 |
+                                                                |1,2,3,4,5 |
+            也可以在merge_old_df_and_new_df函数中的merge_tags这个UDF行操作中再使用lit转然后进行行操作也可以，这里也可以，
+            因为merge_tags这个UDF是对"行对象的操作"，这是Spark的行为，跟python列表无法进行直接交互操作，需要将python列表转spark的"行对象"，行对象和行对象才可以进行交互                                                   
             """
             result_df = self.merge_old_df_and_new_df(new_df, old_df, F.lit(",".join(str(id) for id in fiveTagIDList)))
         except:
