@@ -42,6 +42,16 @@ input_df = spark.readStream \
     .load()
 
 # 选择value字段信息（Nginx日志）
+# 在 Kafka 中，数据以消息（message）的形式存储和传递。每条消息包含两个主要部分：key 和 value
+# 读出来的是一个名叫input_df的dataframe,每行数据都是一个Kafka 的 value，
+# value可以是任意格式，具体取决于生产者发送的数据格式。常见的格式包括纯文本（如字符串日志行）、JSON、Avro、Protobuf 等。
+# 在本例子中，Nginx 日志通常是以纯文本格式发送的，所以 本例子Kafka 的 value 也是纯文本txt,读成df的每行就是txt格式了--df列名就取Kafka的键值对消息的value关键字为列名
+# 这里需要将value类型转为string类型
+# 通过在 selectExpr 中执行 SQL 函数和表达式来完成简单的格式转换
+
+# DSL中的两个类SQL操作的比较：
+# selectExpr()--单独使用SQL操作
+# function中的expr()--在DSL的统计操作中使用SQL语句操作
 input_df = input_df.selectExpr("cast(value as string)")
 
 """
@@ -69,6 +79,7 @@ regexp = '(?<ip>\d+\.\d+\.\d+\.\d+) (- - \[)(?<datetime>[\s\S]+)(?<t1>\][\s"]+)(
 # 数据：日志数据
 # 正则：Java版本的正则
 # 索引号：从1开始
+#
 input_df = input_df.select(F.regexp_extract("value", regexp, 1).alias("ip"),
                            F.regexp_extract("value", regexp, 3).alias("datetime"),
                            F.regexp_extract("value", regexp, 5).alias("request"),

@@ -32,7 +32,10 @@ input_df = spark.readStream \
     .option("startingOffsets", "earliest") \
     .option("subscribe", "tfec_user_event") \
     .load()
-
+# 在 Kafka 中，数据以消息（message）的形式存储和传递。每条消息包含两个主要部分：key 和 value
+# 读出来的是一个名叫input_df的dataframe,每行数据都是一个Kafka 的 value，
+# value可以是任意格式，具体取决于生产者发送的数据格式。常见的格式包括纯文本（如字符串日志行）、JSON、Avro、Protobuf 等。
+# 本例子中Kafka的键值对消息的value是个json格式，需要通过selectExpr算子的SQL表达式将value转类型为字符串string
 input_df = input_df.selectExpr("cast(value as string)")
 
 """
@@ -100,6 +103,10 @@ input_df = input_df.select(
 # expr(sql)
 # count:可以统计结果为0的值，但是不会统计结果为null的值。
 # sum:不会统计结果为null和为0的值
+
+# DSL中的两个类SQL操作的比较：
+# selectExpr()--单独使用SQL操作
+# function中的expr()--在DSL的统计操作中使用SQL语句操作
 input_df = input_df.groupBy("user_id").agg(F.count(F.expr("if(is_browse = 1,user_id,null)")).alias("is_browse_cnt"),
                                            F.count(F.expr("if(is_order = 1,user_id,null)")).alias("is_order_cnt"),
                                            F.count(F.expr("if(is_buy = 1,user_id,null)")).alias("is_buy_cnt"),
