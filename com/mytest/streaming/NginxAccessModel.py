@@ -34,6 +34,42 @@ spark = SparkSession \
 # up01:8020连接失败的问题。
 # 产生原因：没有启动HDFS，Spark是配置的是Yarn模式，Yarn模式中操作HDFS，当HDFS没有启动时，Yarn无法操作HDFS，因此连接失败
 # 解决方案：启动HDFS（start-dfs.sh）
+"""
+在 Spark Structured Streaming 中，读取 Kafka 数据时，每次读取的记录数是由多种因素决定的。以下是一些关键点：
+读取批次中的记录数：
+1、Micro-batch 模式：
+Spark Structured Streaming 默认采用 Micro-batch 模式，在这种模式下，每个微批次会处理一定数量的记录。
+读取的记录数取决于源数据的速率、批次间隔和可用的系统资源。
+可以通过 .trigger 方法来设置批次间隔，如 Spark 每分钟处理一个微批次，例如：
+input_df = spark.readStream \
+    .format("kafka") \
+    .option("kafka.bootstrap.servers", "up01:9092") \
+    .option("subscribe", "tfec_access_topic") \
+    .option("startingOffsets", "earliest") \
+    .load() \
+    .withWatermark("timestamp", "10 minutes") \
+    .trigger(processingTime='1 minute')
+    
+2、Continuous Processing 模式（实验性特性）：
+Structured Streaming 默认使用微批模式，而在持续流模式下，spark不是定期调度新批次的任务，
+而是启动一直运行的驻守在 executor 上的任务，源源不断的进行读取处理输出数据
+因为在 executor 端是持续流处理的，所以最低延迟可以降到 几毫秒
+
+Spark 2.3 引入了 Continuous Processing 模式，可以实现低延迟流处理。
+在这种模式下，数据处理是连续的，而不是按微批次进行。
+
+下面使用的就是低延迟流的方案，只在writeStream中使用，一般读Kafka不需要关注：
+# Continuous Processing 模式需要启用检查点，因为它依赖于检查点来管理容错性和状态管理。
+可以使用 .option("checkpointLocation", "path_to_checkpoint") 来指定检查点路径
+# 配置 Continuous Processing 模式和检查点路径
+query = input_df.writeStream \
+    .format("console") \
+    .option("checkpointLocation", "/path/to/checkpoint") \
+    .trigger(continuous="1 second")  # 这里设置 Continuous Processing 模式，检查点间隔为1秒
+    .start()
+query.awaitTermination()
+
+"""
 input_df = spark.readStream \
     .format("kafka") \
     .option("kafka.bootstrap.servers", "up01:9092") \
