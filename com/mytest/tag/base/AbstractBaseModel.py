@@ -107,6 +107,9 @@ class AbstractBaseModel:
 
         # 此处使用的但是对象类型的变量(私有变量)，不是类的变量(公共变量)
         self.fourTagId = fourTagId
+        # spark对象的初始化配置，如果只给executor进程分配一个core核心，那么这个executor进程的线程池只能进行一个任务再运行，即表现为一个executor进程只处理一个task任务
+        # 假如executor进程分配2个core核心，此时表现为一个executor进程可以并行处理2个task任务
+        # 一个task处理一个分区的数据，假如涉及分区数据交互，则分两个或以上的task
         self.spark = SparkSession \
             .builder \
             .master("local[2]") \
