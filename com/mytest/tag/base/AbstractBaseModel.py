@@ -218,6 +218,7 @@ class AbstractBaseModel:
     # select与withColumn:
     # (1)select:尽管select算子本身不是逐行操作，但它可以在内部调用逐行操作的UDF函数，因为Spark会将DataFrame的每一行数据传递给UDF进行处理,对已经有的列通过UDF产生新列通过alias来逐行命名新列名
     # (2)withColumn: withColumn是一种逐行操作。可以用来对 DataFrame 的每一行应用一个函数，并创建一个新列或替换一个现有列
+    # UDF（用户自定义函数）可以对 DataFrame 的列进行逐行参数传递操作并返回新结果
     def merge_old_df_and_new_df(self, new_df, old_df, fiveTagIDStr):
         result_df = new_df.join(other=old_df, on=new_df['userId'] == old_df['userId'], how='left') \
             .select(new_df['userId'], merge_tags(new_df['tagsId'], old_df['tagsId'], fiveTagIDStr).alias("tagsId"))
